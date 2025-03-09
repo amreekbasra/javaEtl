@@ -1,0 +1,288 @@
+package com.example.etl;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.web.client.RestTemplate;
+
+@SpringBootApplication
+@EnableAsync
+public class EtlApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EtlApplication.class, args);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+// TransformationMapping.java
+package com.example.etl.model;
+
+public class TransformationMapping {
+    private String sourceField;
+    private String sourceType;
+    private String destinationField;
+    private String destinationType;
+
+    // Getters and Setters
+    public String getSourceField() { return sourceField; }
+    public void setSourceField(String sourceField) { this.sourceField = sourceField; }
+    public String getSourceType() { return sourceType; }
+    public void setSourceType(String sourceType) { this.sourceType = sourceType; }
+    public String getDestinationField() { return destinationField; }
+    public void setDestinationField(String destinationField) { this.destinationField = destinationField; }
+    public String getDestinationType() { return destinationType; }
+    public void setDestinationType(String destinationType) { this.destinationType = destinationType; }
+}
+
+// FileProcessorService.java
+package com.example.etl.service;
+
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.stream.Stream;
+import java.util.concurrent.CompletableFuture;
+
+@Service
+public class FileProcessorService {
+    private final TransformationService transformationService;
+    private final LoadService loadService;
+
+    public FileProcessorService(TransformationService transformationService, LoadService loadService) {
+        this.transformationService = transformationService;
+        this.loadService = loadService;
+    }
+
+    @Async
+    public CompletableFuture<Void> processFile(String filePath) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            Stream<String> lines = reader.lines();
+            List<Object> batch = new ArrayList<>();
+            lines.forEach(line -> {
+                Object transformed = transformationService.transform(line);
+                batch.add(transformed);
+                if (batch.size() >= 1000) {
+                    List<Object> batchCopy = new ArrayList<>(batch);
+                    loadService.saveToDatabaseAsync(batchCopy);
+                    batch.clear();
+                }
+            });
+            if (!batch.isEmpty()) {
+                loadService.saveToDatabaseAsync(batch);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+}
+
+// TransformationService.java
+package com.example.etl.service;
+
+import com.example.etl.model.TransformationMapping;
+import org.springframework.stereotype.Service;
+import java.lang.reflect.Field;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Service
+public class TransformationService {
+    private final List<TransformationMapping> mappings;
+
+    public TransformationService(List<TransformationMapping> mappings) {
+        this.mappings = mappings;
+    }
+
+    public Object transform(String rawData) {
+        String[] values = rawData.split(",");
+        Map<String, String> mappingMap = mappings.stream()
+                .collect(Collectors.toMap(TransformationMapping::getSourceField, TransformationMapping::getDestinationField));
+
+        TransformedData transformedData = new TransformedData();
+        Field[] fields = transformedData.getClass().getDeclaredFields();
+
+        for (Field field : fields) {
+            String sourceField = mappingMap.get(field.getName());
+            if (sourceField != null) {
+                field.setAccessible(true);
+                try {
+                    field.set(transformedData, values[Integer.parseInt(sourceField)]);
+                } catch (IllegalAccessException | NumberFormatException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        return transformedData;
+    }
+}
+
+// LoadService.java
+package com.example.etl.service;
+
+import com.example.etl.repository.DataRepository;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+@Service
+public class LoadService {
+    private final DataRepository dataRepository;
+
+    public LoadService(DataRepository dataRepository) {
+        this.dataRepository = dataRepository;
+    }
+
+    @Async
+    public CompletableFuture<Void> saveToDatabaseAsync(List<Object> transformedData) {
+        dataRepository.saveAllBatch(transformedData);
+        System.out.println("Batch saved to DB: " + transformedData.size() + " records");
+        return CompletableFuture.completedFuture(null);
+    }
+}
+
+// DataRepository.java
+package com.example.etl.repository;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+import java.util.List;
+
+@Repository
+public class DataRepository {
+    private final JdbcTemplate jdbcTemplate;
+
+    public DataRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public void saveAllBatch(List<Object> dataBatch) {
+        String sql = "INSERT INTO etl_table (data) VALUES (?)";
+        jdbcTemplate.batchUpdate(sql, dataBatch, 1000, (ps, data) -> ps.setObject(1, data));
+    }
+}
+
+// ETLController.java
+package com.example.etl.controller;
+
+import com.example.etl.service.FileProcessorService;
+import org.springframework.web.bind.annotation.*;
+import java.util.concurrent.CompletableFuture;
+
+@RestController
+@RequestMapping("/etl")
+public class ETLController {
+    private final FileProcessorService fileProcessorService;
+
+    public ETLController(FileProcessorService fileProcessorService) {
+        this.fileProcessorService = fileProcessorService;
+    }
+
+    @PostMapping("/start")
+    public CompletableFuture<String> startETL(@RequestParam String filePath) {
+        return fileProcessorService.processFile(filePath).thenApply(v -> "ETL Started!");
+    }
+}
+
+//retry
+package com.example.etl;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.web.client.RestTemplate;
+
+@SpringBootApplication
+@EnableAsync
+public class EtlApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EtlApplication.class, args);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+// TransformationService.java
+package com.example.etl.service;
+
+import com.example.etl.model.TransformationMapping;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.stereotype.Service;
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+
+@Service
+public class TransformationService {
+    private final List<TransformationMapping> mappings;
+    private final ExecutorService executorService = Executors.newFixedThreadPool(10); // Parallel Execution
+
+    public TransformationService(List<TransformationMapping> mappings) {
+        this.mappings = mappings;
+    }
+
+    @Retryable(value = Exception.class, maxAttempts = 3)
+    public Object transform(String rawData) {
+        String[] values = rawData.split(",");
+        Map<String, TransformationMapping> mappingMap = mappings.stream()
+                .collect(Collectors.toMap(TransformationMapping::getSourceField, mapping -> mapping));
+
+        TransformedData transformedData = new TransformedData();
+        Field[] fields = transformedData.getClass().getDeclaredFields();
+
+        for (Field field : fields) {
+            TransformationMapping mapping = mappingMap.get(field.getName());
+            if (mapping != null) {
+                field.setAccessible(true);
+                try {
+                    Object convertedValue = convertValue(values[Integer.parseInt(mapping.getSourceField())], mapping.getDestinationType());
+                    field.set(transformedData, convertedValue);
+                } catch (IllegalAccessException | NumberFormatException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        return transformedData;
+    }
+
+    private Object convertValue(String value, String destinationType) {
+        try {
+            switch (destinationType.toLowerCase()) {
+                case "integer":
+                    return Integer.parseInt(value);
+                case "decimal":
+                    return new BigDecimal(value);
+                case "datetime":
+                    return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(value);
+                case "string":
+                default:
+                    return value;
+            }
+        } catch (ParseException | NumberFormatException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+}

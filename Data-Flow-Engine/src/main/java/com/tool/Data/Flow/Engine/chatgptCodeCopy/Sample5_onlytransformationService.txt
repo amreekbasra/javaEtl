@@ -1,0 +1,85 @@
+package com.example.etl;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.web.client.RestTemplate;
+
+@SpringBootApplication
+@EnableAsync
+public class EtlApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EtlApplication.class, args);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+// TransformationService.java
+package com.example.etl.service;
+
+import com.example.etl.model.TransformationMapping;
+import org.springframework.stereotype.Service;
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Service
+public class TransformationService {
+    private final List<TransformationMapping> mappings;
+
+    public TransformationService(List<TransformationMapping> mappings) {
+        this.mappings = mappings;
+    }
+
+    public Object transform(String rawData) {
+        String[] values = rawData.split(",");
+        Map<String, TransformationMapping> mappingMap = mappings.stream()
+                .collect(Collectors.toMap(TransformationMapping::getSourceField, mapping -> mapping));
+
+        TransformedData transformedData = new TransformedData();
+        Field[] fields = transformedData.getClass().getDeclaredFields();
+
+        for (Field field : fields) {
+            TransformationMapping mapping = mappingMap.get(field.getName());
+            if (mapping != null) {
+                field.setAccessible(true);
+                try {
+                    Object convertedValue = convertValue(values[Integer.parseInt(mapping.getSourceField())], mapping.getDestinationType());
+                    field.set(transformedData, convertedValue);
+                } catch (IllegalAccessException | NumberFormatException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        return transformedData;
+    }
+
+    private Object convertValue(String value, String destinationType) {
+        try {
+            switch (destinationType.toLowerCase()) {
+                case "integer":
+                    return Integer.parseInt(value);
+                case "decimal":
+                    return new BigDecimal(value);
+                case "datetime":
+                    return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(value);
+                case "string":
+                default:
+                    return value;
+            }
+        } catch (ParseException | NumberFormatException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+}

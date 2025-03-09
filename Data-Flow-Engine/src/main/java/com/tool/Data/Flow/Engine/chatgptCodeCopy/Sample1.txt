@@ -1,0 +1,133 @@
+// package com.tool.Data.Flow.Engine.chatgptCodeCopy;
+
+// public class sample1 {
+    
+// }
+
+package com.example.etl;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.web.client.RestTemplate;
+
+@SpringBootApplication
+public class EtlApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EtlApplication.class, args);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+// FileProcessorService.java
+package com.example.etl.service;
+
+import org.springframework.stereotype.Service;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Stream;
+
+@Service
+public class FileProcessorService {
+    private final ExecutorService executorService = Executors.newFixedThreadPool(10);
+    private final TransformationService transformationService;
+    private final LoadService loadService;
+
+    public FileProcessorService(TransformationService transformationService, LoadService loadService) {
+        this.transformationService = transformationService;
+        this.loadService = loadService;
+    }
+
+    public void processFile(String filePath) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            Stream<String> lines = reader.lines();
+            lines.forEach(line -> executorService.submit(() -> {
+                String transformed = transformationService.transform(line);
+                loadService.saveToDatabase(transformed);
+            }));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+// TransformationService.java
+package com.example.etl.service;
+
+import org.springframework.stereotype.Service;
+
+@Service
+public class TransformationService {
+    public String transform(String input) {
+        return input.toUpperCase(); // Example transformation
+    }
+}
+
+// LoadService.java
+package com.example.etl.service;
+
+import org.springframework.stereotype.Service;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+@Service
+public class LoadService {
+    private final ExecutorService executorService = Executors.newFixedThreadPool(5);
+
+    public void saveToDatabase(String transformedData) {
+        executorService.submit(() -> {
+            System.out.println("Saving to DB: " + transformedData);
+        });
+    }
+}
+
+// ProgressReportingController.java
+package com.example.etl.controller;
+
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/progress")
+public class ProgressReportingController {
+    private int progress = 0;
+
+    @GetMapping
+    public String getProgress() {
+        return "ETL Progress: " + progress + "%";
+    }
+
+    @PostMapping("/update")
+    public void updateProgress(@RequestParam int value) {
+        progress = value;
+    }
+}
+
+// ETLController.java
+package com.example.etl.controller;
+
+import com.example.etl.service.FileProcessorService;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/etl")
+public class ETLController {
+    private final FileProcessorService fileProcessorService;
+
+    public ETLController(FileProcessorService fileProcessorService) {
+        this.fileProcessorService = fileProcessorService;
+    }
+
+    @PostMapping("/start")
+    public String startETL(@RequestParam String filePath) {
+        fileProcessorService.processFile(filePath);
+        return "ETL Started!";
+    }
+}
+
