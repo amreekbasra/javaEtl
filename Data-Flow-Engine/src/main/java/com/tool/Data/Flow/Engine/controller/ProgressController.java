@@ -14,12 +14,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class ProgressController {
-
     private final ProgressReportingService progressReportingService;
 
     @GetMapping
     public String getProgress() {
-       
         try {
             return progressReportingService.getProgress();
         } catch (Exception ex) {
@@ -27,9 +25,21 @@ public class ProgressController {
             throw ex; // Let the global exception handler handle it
         }
     }
-    public void exampleMethod() {
-        log.info("This is an info message");
-        log.debug("This is a debug message");
-        log.error("This is an error message");
-    } 
+    // private final ProgressReportingService progressReportingService;
+
+    // @GetMapping
+    // public String getProgress() {
+       
+    //     try {
+    //         return progressReportingService.getProgress();
+    //     } catch (Exception ex) {
+    //         log.error("Error getting progress", ex);
+    //         throw ex; // Let the global exception handler handle it
+    //     }
+    // }
+    // public void exampleMethod() {
+    //     log.info("This is an info message");
+    //     log.debug("This is a debug message");
+    //     log.error("This is an error message");
+    // } 
 }

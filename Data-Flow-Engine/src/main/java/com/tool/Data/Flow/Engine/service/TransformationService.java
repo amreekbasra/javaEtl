@@ -10,6 +10,8 @@ package com.tool.Data.Flow.Engine.service;
 
 // import lombok.extern.slf4j.Slf4j;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Service;
 
 import com.tool.Data.Flow.Engine.model.DataRecord;
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
 import java.lang.reflect.Field;
 
 @Service
+@Scope("prototype") // this change scop from singleton to prototype new instance everytime
 @Slf4j
 public class TransformationService {
 
